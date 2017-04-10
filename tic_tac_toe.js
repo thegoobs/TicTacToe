@@ -19,57 +19,38 @@ var game = {
   p1score: 0,
   p2score: 0,
   
-  turn: 0 //turn is based on even/odd
-};
-
-//use this variable to check for victory
-var winConditions = {
-  rows: [
-    [
-      [0, 0],
-      [0, 1],
-      [0, 2]
-    ],
-    [
-      [1, 0],
-      [1, 1],
-      [1, 2]
-    ],
-    [
-      [2, 0],
-      [2, 1],
-      [2, 2]
-    ]
-  ],
-  columns: [
-    [
-      [0, 0],
-      [1, 0],
-      [2, 0]
-    ],
-    [
-      [0, 1],
-      [1, 1],
-      [2, 1]
-    ],
-    [
-      [0, 2],
-      [1, 2],
-      [2, 2]
-    ]
-  ],
-  corners: [
-    [
-      [2, 0],
-      [1, 1],
-      [0, 2]
-    ], //top right, bottom left
-    [
-      [0, 0],
-      [1, 1],
-      [2, 2]
-    ] //top left, bottom right
-  ]
+  turn: 0, //turn is based on even/odd
+  getTurn: function() {
+    return this.turn % 2 + 1;
+  },
+  
+  getRemainingTurns: function(grid) {
+    var i, j, ctr = 0;
+    for (i = 0; i < 3; i += 1) {
+      for (j = 0; j < 3; j += 1) {
+        if (grid[i][j] === 0) {
+          ctr += 1;
+        }//if
+      }//for
+    }//for
+    return ctr;
+  },
+  getPossibleMoves: function(grid) {
+    var i, j;
+    var list = [];
+    for (i = 0; i < 3; i += 1) {
+      for (j = 0; j < 3; j += 1) {
+        if (grid[i][j] === 0) {
+          var c = {
+            x: i,
+            y: j
+          };
+          list.push(c);
+        }//if
+      }//for
+    }//for
+    return list;
+  }
 };
 
 function checkWinConditions(symbol) {
@@ -165,6 +146,7 @@ function checkWinConditions(symbol) {
                       [0, 0, 0]
                     ];
         game.turn = 0;
+        MCST.reward(0); //reward for player 0 => draw
         MCST.moveList = [];
       }//elseif
     }//for
@@ -178,8 +160,9 @@ function Node() {
   this.parent = null;
   this.player = 0;
   this.data = {
-    win: 1,
-    loss: 1,
+    win: 0,
+    loss: 0,
+    simulations: 5
   };
   this.children = [];
   this.pos = {
@@ -192,7 +175,7 @@ function Tree() {
   this._root = new Node();
   this._root.pos.x = null;
   this._root.pos.y = null;
-  this.simulations = 0;
+  this.simulations = 10000000;
   this.moveList = [];
 }
 
@@ -261,6 +244,7 @@ MCST.move = function(xPos, yPos) {
     node.parent = walk;
     node.pos.x = xPos;
     node.pos.y = yPos;
+    node.player = game.turn % 2 + 1;
     this.moveList.push(node);
     walk.children.push(node);
   }//else
@@ -282,14 +266,86 @@ MCST.reward = function(player) {
           else if (player === 2) {
             walk.data.win += 1;
           }//elseif
+          walk.data.simulations += 1;
           walk = walk.children[i];
           break;
         }//if
       }//for
     }//while
 };
+
+function expand(node) {
+  if (node.children.length === game.getRemainingTurns(game.grid)) {
+    return false;
+  }
+  var moves = game.getPossibleMoves(game.grid);
+  var i;
+  
+  for (i = 0; i < game.getRemainingTurns(game.grid); i += 1) {
+    var child = new Node();
+    child.pos.x = moves[i].x;
+    child.pos.y = moves[i].y;
+    child.parent = node;
+    node.children.push(child);
+  }
+  return true;
+}
+
+function think(lastMove) {
+  var i, max = 0;
+  var selectedNode;
+  
+  //simulate from the last move
+  if (lastMove.children.length < game.getRemainingTurns(game.grid)) {
+    expand(lastMove);
+  }//if
+  for (i = 0; i < lastMove.children.length; i += 1) {
+    var child = lastMove.children[i];
+    //get UCT value of next moves
+    if (game.grid[child.pos.x][child.pos.y] > 0) {
+      continue;
+    }
+    var uct = ((child.data.win - child.data.loss) / child.data.simulations) + Math.sqrt(2 * Math.log(MCST.simulations) / Math.log(child.data.simulations));
+    if (uct === 0) {
+      uct = 1;
+    }
+    if (uct > max) {
+      selectedNode = child;
+      max = uct;
+    }//if
+  }//for
+  MCST.move(selectedNode.pos.x, selectedNode.pos.y);
+}
+
 function simulate() {
-   
+  var ctr = 0;
+  MCST.move(0, 0);
+  while (ctr < MCST.simulations) {
+    if (game.getRemainingTurns(game.grid) === 9) {
+      MCST.move(Math.floor(Math.random() * 3), Math.floor(Math.random() * 3));
+    }//if
+    else if (game.getTurn() === 1) {
+      think(MCST.moveList[MCST.moveList.length - 1]);
+      checkWinConditions(1);
+    }
+    else if (game.getTurn() === 2) {
+      think(MCST.moveList[MCST.moveList.length - 1]);
+      checkWinConditions(2);
+    }//if
+    //when completed, decrement simulations
+    ctr += 1;
+  }//while
+  console.log(ctr);
+  //once the loop is completed, reset game and let user begin
+  game.p1score = 0;
+  game.p2score = 0;
+  game.grid = [
+      [0,0,0],
+      [0,0,0],
+      [0,0,0]
+    ];
+  MCST.moveList = [];
+  game.turn = 0;
 }//simulate
 
 //draw TTT grid
@@ -364,7 +420,7 @@ $("#screen").click(function(e) {
       if (x >= 100 + 100 * i &&
         x <= 175 + 100 * i &&
         y >= 100 + 100 * j &&
-        y <= 175 + 100 * j) {
+        y <= 175 + 100 * j && game.getTurn() === 1) {
         MCST.move(i, j);
       } //if
     } //for
@@ -380,16 +436,25 @@ $("#screen").click(function(e) {
       [0,0,0]
     ];
     MCST.moveList = [];
+    game.turn = 0;
   }//if
+  
+  //check for win
+  checkWinConditions(1);
 });
 //draw function
 function main() {
-  //refresh screen based on interval
+  //refresh screen based on interval & draw
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   drawGrid();
-  checkWinConditions(1);
-  checkWinConditions(2);
+  
+  //if it is CPU's turn
+  if (game.getTurn() === 2) {
+    think(MCST.moveList[MCST.moveList.length - 1]);
+    checkWinConditions(2);
+  }//if
 }
+simulate();
 setInterval(main, 10);
 
 //COLOR SCHEME
